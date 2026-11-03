@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="Volume Remote logo" width="128" height="128">
+</p>
+
 # Volume Remote
 
 Use your Android phone's browser as a volume remote for your Ubuntu laptop.

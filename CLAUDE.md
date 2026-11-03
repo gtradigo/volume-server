@@ -6,6 +6,7 @@ A small Flask app that runs on an Ubuntu laptop and serves a mobile-friendly web
 
 - `server.py` — the whole app: Flask routes, the `pactl` wrappers, and the HTML/CSS/JS page (embedded as the `INDEX_HTML` string).
 - `README.md` — setup and usage instructions for the user.
+- `assets/logo.svg` — app logo (volume dial), shown at the top of the README.
 
 ## Run
 
