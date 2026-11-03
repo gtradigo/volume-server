@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""
+Volume Remote — control your Ubuntu laptop's volume from your phone's browser.
+
+Run this on your LAPTOP:
+    pip install flask
+    python3 server.py
+
+Then on your PHONE (same WiFi network), open the URL it prints,
+e.g. http://192.168.1.42:5000
+"""
+
+import re
+import socket
+import subprocess
+
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+SINK = "@DEFAULT_SINK@"
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
+
+def get_status():
+    """Return current volume (0-100) and mute state using pactl."""
+    vol = 0
+    muted = False
+    try:
+        out = run(["pactl", "get-sink-volume", SINK]).stdout
+        m = re.search(r"(\d+)%", out)
+        if m:
+            vol = int(m.group(1))
+    except Exception:
+        pass
+    try:
+        out = run(["pactl", "get-sink-mute", SINK]).stdout
+        muted = "yes" in out.lower()
+    except Exception:
+        pass
+    return {"volume": vol, "muted": muted}
+
+
+@app.route("/")
+def index():
+    return INDEX_HTML
+
+
+@app.route("/api/status")
+def api_status():
+    return jsonify(get_status())
+
+
+@app.route("/api/set", methods=["POST"])
+def api_set():
+    level = int(request.json.get("level", 50))
+    level = max(0, min(100, level))
+    run(["pactl", "set-sink-volume", SINK, f"{level}%"])
+    return jsonify(get_status())
+
+
+@app.route("/api/step", methods=["POST"])
+def api_step():
+    delta = int(request.json.get("delta", 5))
+    sign = "+" if delta >= 0 else "-"
+    run(["pactl", "set-sink-volume", SINK, f"{sign}{abs(delta)}%"])
+    return jsonify(get_status())
+
+
+@app.route("/api/mute", methods=["POST"])
+def api_mute():
+    run(["pactl", "set-sink-mute", SINK, "toggle"])
+    return jsonify(get_status())
+
+
+INDEX_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Volume Remote</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --accent: #4f8cff;
+    --text: #f2f3f5;
+    --muted-color: #ff5b6a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overscroll-behavior: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .card {
+    width: 100%;
+    max-width: 380px;
+    padding: 32px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #9aa1ac;
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+  .volume-display {
+    font-size: 64px;
+    font-weight: 700;
+    line-height: 1;
+    transition: color 0.2s ease;
+  }
+  .muted .volume-display { color: var(--muted-color); }
+
+  .slider-wrap {
+    width: 100%;
+    padding: 8px 0;
+  }
+  input[type=range] {
+    width: 100%;
+    height: 48px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(to right, var(--accent) var(--fill, 50%), #2b2f38 0);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #fff;
+    margin-top: -10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+
+  .row {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+  }
+  button {
+    flex: 1;
+    border: none;
+    border-radius: 16px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 26px;
+    padding: 20px 0;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.08s ease;
+  }
+  button:active { transform: scale(0.95); background: #262a33; }
+
+  .mute-btn {
+    width: 100%;
+    background: var(--card);
+    font-size: 17px;
+    padding: 16px 0;
+    border-radius: 16px;
+    color: #c6cad2;
+    letter-spacing: 0.03em;
+  }
+  .mute-btn.active {
+    background: var(--muted-color);
+    color: #fff;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3ddc84;
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .status-dot.offline { background: #ff5b6a; }
+  .status-line {
+    font-size: 12px;
+    color: #6b7280;
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <h1>VOLUME REMOTE</h1>
+    <div class="volume-display" id="volDisplay">--</div>
+
+    <div class="slider-wrap">
+      <input type="range" id="slider" min="0" max="100" value="50">
+    </div>
+
+    <div class="row">
+      <button id="downBtn">&#8722;</button>
+      <button id="upBtn">&#43;</button>
+    </div>
+
+    <button class="mute-btn" id="muteBtn">MUTE</button>
+
+    <div class="status-line"><span class="status-dot" id="statusDot"></span><span id="statusText">connecting…</span></div>
+  </div>
+
+<script>
+const slider = document.getElementById('slider');
+const volDisplay = document.getElementById('volDisplay');
+const upBtn = document.getElementById('upBtn');
+const downBtn = document.getElementById('downBtn');
+const muteBtn = document.getElementById('muteBtn');
+const card = document.getElementById('card');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+
+let syncing = false;
+
+function render(status) {
+  slider.value = status.volume;
+  slider.style.setProperty('--fill', status.volume + '%');
+  volDisplay.textContent = status.muted ? 'MUTED' : status.volume;
+  card.classList.toggle('muted', status.muted);
+  muteBtn.classList.toggle('active', status.muted);
+  muteBtn.textContent = status.muted ? 'UNMUTE' : 'MUTE';
+}
+
+function setOnline(ok) {
+  statusDot.classList.toggle('offline', !ok);
+  statusText.textContent = ok ? 'connected' : 'connection lost';
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    if (!syncing) render(data);
+    setOnline(true);
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+async function post(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {})
+    });
+    const data = await r.json();
+    render(data);
+    setOnline(true);
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+let debounceTimer = null;
+slider.addEventListener('input', () => {
+  syncing = true;
+  slider.style.setProperty('--fill', slider.value + '%');
+  volDisplay.textContent = slider.value;
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    post('/api/set', {level: parseInt(slider.value, 10)});
+    syncing = false;
+  }, 120);
+});
+
+upBtn.addEventListener('click', () => post('/api/step', {delta: 5}));
+downBtn.addEventListener('click', () => post('/api/step', {delta: -5}));
+muteBtn.addEventListener('click', () => post('/api/mute'));
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
+"""
+
+
+def local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+if __name__ == "__main__":
+    ip = local_ip()
+    print("\n  Volume Remote is running.")
+    print(f"  On your phone (same WiFi), open:  http://{ip}:5000\n")
+    app.run(host="0.0.0.0", port=5000)
