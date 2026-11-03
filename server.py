@@ -10,13 +10,16 @@ Then on your PHONE (same WiFi network), open the URL it prints,
 e.g. http://192.168.1.42:5000
 """
 
+import os
 import re
 import socket
 import subprocess
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__)
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 SINK = "@DEFAULT_SINK@"
 
@@ -47,6 +50,29 @@ def get_status():
 @app.route("/")
 def index():
     return INDEX_HTML
+
+
+@app.route("/assets/<path:filename>")
+def assets(filename):
+    return send_from_directory(ASSETS_DIR, filename)
+
+
+@app.route("/manifest.json")
+def manifest():
+    return jsonify(
+        {
+            "name": "Volume Remote",
+            "short_name": "Volume",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#0f1115",
+            "theme_color": "#0f1115",
+            "icons": [
+                {"src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            ],
+        }
+    )
 
 
 @app.route("/api/status")
@@ -83,6 +109,10 @@ INDEX_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Volume Remote</title>
+<link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+<link rel="apple-touch-icon" href="/assets/icon-192.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f1115">
 <style>
   :root {
     --bg: #0f1115;
@@ -113,6 +143,11 @@ INDEX_HTML = """
     flex-direction: column;
     align-items: center;
     gap: 24px;
+  }
+  .logo {
+    width: 88px;
+    height: 88px;
+    border-radius: 20px;
   }
   h1 {
     font-size: 18px;
@@ -207,6 +242,7 @@ INDEX_HTML = """
 </head>
 <body>
   <div class="card" id="card">
+    <img class="logo" src="/assets/logo.svg" alt="Volume Remote logo">
     <h1>VOLUME REMOTE</h1>
     <div class="volume-display" id="volDisplay">--</div>
 
