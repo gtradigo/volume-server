@@ -2,6 +2,15 @@
   <img src="assets/logo.svg" alt="Volume Remote logo" width="128" height="128">
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10-3776AB?logo=python&logoColor=white" alt="Python 3.10">
+  <img src="https://img.shields.io/badge/flask-2.3-000000?logo=flask&logoColor=white" alt="Flask 2.3">
+  <img src="https://img.shields.io/badge/platform-Ubuntu%20Linux-E95420?logo=ubuntu&logoColor=white" alt="Platform: Ubuntu Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/gtradigo/volume-server" alt="License"></a>
+  <img src="https://img.shields.io/github/last-commit/gtradigo/volume-server" alt="Last commit">
+  <img src="https://img.shields.io/github/repo-size/gtradigo/volume-server" alt="Repo size">
+</p>
+
 # Volume Remote
 
 Use your Android phone's browser as a volume remote for your Ubuntu laptop.
@@ -66,3 +75,7 @@ You'll see a big volume readout, a slider, +/- buttons, and a mute toggle. Chang
   ```
 - To keep it running in the background: `nohup python3 server.py &`, or set it up as a systemd service if you want it to survive reboots — just ask and I can put that together too.
 - Volume control uses `pactl`, which works with both PulseAudio and PipeWire (Ubuntu's current default sound server), so this should work out of the box on any recent Ubuntu version.
+
+## License
+
+Released under the [MIT License](LICENSE).
