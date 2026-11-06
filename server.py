@@ -4,16 +4,20 @@ Volume Remote — control your Ubuntu laptop's volume from your phone's browser.
 
 Run this on your LAPTOP:
     pip install flask
-    python3 server.py
+    python3 server.py          # or: python3 server.py --tray
 
 Then on your PHONE (same WiFi network), open the URL it prints,
 e.g. http://192.168.1.42:5000
 """
 
+import argparse
 import os
 import re
+import signal
 import socket
 import subprocess
+import threading
+import time
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -22,10 +26,13 @@ app = Flask(__name__)
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 SINK = "@DEFAULT_SINK@"
+PORT = 5000
 
 
 def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+    # pactl's output is localized (e.g. "Mute: sì"), so force English for parsing.
+    env = {**os.environ, "LC_ALL": "C"}
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=5, env=env)
 
 
 def get_status():
@@ -347,8 +354,113 @@ def local_ip():
         s.close()
 
 
+def serve():
+    app.run(host="0.0.0.0", port=PORT)
+
+
+def load_tray_libs():
+    """Return (Gdk, GLib, Gtk, AppIndicator), or None if there's no usable tray."""
+    try:
+        import gi
+
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gdk, GLib, Gtk
+
+        try:
+            # Newer Ubuntu releases only ship the Ayatana fork.
+            gi.require_version("AyatanaAppIndicator3", "0.1")
+            from gi.repository import AyatanaAppIndicator3 as AppIndicator
+        except ValueError:
+            gi.require_version("AppIndicator3", "0.1")
+            from gi.repository import AppIndicator3 as AppIndicator
+    except (ImportError, ValueError) as e:
+        print(f"  Tray disabled: {e}")
+        return None
+    if not Gtk.init_check()[0]:
+        print("  Tray disabled: no graphical session.")
+        return None
+    return Gdk, GLib, Gtk, AppIndicator
+
+
+def run_tray(url, libs):
+    """Show the tray icon on the main thread and serve Flask in the background."""
+    Gdk, GLib, Gtk, AppIndicator = libs
+
+    indicator = AppIndicator.Indicator.new(
+        "volume-remote",
+        os.path.join(ASSETS_DIR, "icon-192.png"),
+        AppIndicator.IndicatorCategory.APPLICATION_STATUS,
+    )
+    indicator.set_title("Volume Remote")
+    indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+
+    menu = Gtk.Menu()
+    url_item = Gtk.MenuItem(label=f"Copy phone URL: {url}")
+    volume_item = Gtk.MenuItem(label="Volume: --")
+    volume_item.set_sensitive(False)
+    mute_item = Gtk.MenuItem(label="Mute")
+    quit_item = Gtk.MenuItem(label="Quit")
+    for item in (url_item, Gtk.SeparatorMenuItem(), volume_item, mute_item,
+                 Gtk.SeparatorMenuItem(), quit_item):
+        menu.append(item)
+    menu.show_all()
+    indicator.set_menu(menu)
+
+    def show_status(status):
+        volume_item.set_label(f"Volume: {'muted' if status['muted'] else status['volume']}")
+        mute_item.set_label("Unmute" if status["muted"] else "Mute")
+
+    def publish_status():
+        GLib.idle_add(show_status, get_status())
+
+    def poll_status():
+        while True:
+            publish_status()
+            time.sleep(2)
+
+    def toggle_mute():
+        run(["pactl", "set-sink-mute", SINK, "toggle"])
+        publish_status()
+
+    def copy_url(_item):
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(url, -1)
+        clipboard.store()
+
+    def serve_then_quit():
+        # If Flask dies (e.g. port in use), don't leave a dead icon in the tray.
+        try:
+            serve()
+        finally:
+            GLib.idle_add(Gtk.main_quit)
+
+    url_item.connect("activate", copy_url)
+    # pactl can block for seconds, so keep it off the GTK thread.
+    mute_item.connect(
+        "activate", lambda _item: threading.Thread(target=toggle_mute, daemon=True).start()
+    )
+    quit_item.connect("activate", lambda _item: Gtk.main_quit())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, Gtk.main_quit)
+
+    threading.Thread(target=serve_then_quit, daemon=True).start()
+    threading.Thread(target=poll_status, daemon=True).start()
+    Gtk.main()
+
+
 if __name__ == "__main__":
-    ip = local_ip()
+    parser = argparse.ArgumentParser(description="Control this laptop's volume from your phone.")
+    parser.add_argument("--tray", action="store_true", help="show a system tray icon")
+    args = parser.parse_args()
+
+    phone_url = f"http://{local_ip()}:{PORT}"
     print("\n  Volume Remote is running.")
-    print(f"  On your phone (same WiFi), open:  http://{ip}:5000\n")
-    app.run(host="0.0.0.0", port=5000)
+    print(f"  On your phone (same WiFi), open:  {phone_url}\n")
+
+    tray_libs = load_tray_libs() if args.tray else None
+    if tray_libs:
+        run_tray(phone_url, tray_libs)
+    else:
+        serve()

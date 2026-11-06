@@ -4,7 +4,7 @@ A small Flask app that runs on an Ubuntu laptop and serves a mobile-friendly web
 
 ## Layout
 
-- `server.py` — the whole app: Flask routes, the `pactl` wrappers, and the HTML/CSS/JS page (embedded as the `INDEX_HTML` string).
+- `server.py` — the whole app: Flask routes, the `pactl` wrappers, the HTML/CSS/JS page (embedded as the `INDEX_HTML` string), and the optional tray icon.
 - `README.md` — setup and usage instructions for the user.
 - `assets/` — logo (`logo.svg`) and PNG icons (`icon-192.png`, `icon-512.png`), served by `server.py` at `/assets/...` and used in the page, favicon and `/manifest.json`.
 
@@ -12,7 +12,7 @@ A small Flask app that runs on an Ubuntu laptop and serves a mobile-friendly web
 
 ```bash
 pip install flask --break-system-packages
-python3 server.py
+python3 server.py          # or: python3 server.py --tray
 ```
 
 The server listens on `0.0.0.0:5000` and prints the LAN URL to open on the phone.
@@ -22,6 +22,7 @@ The server listens on `0.0.0.0:5000` and prints the LAN URL to open on the phone
 - Volume control shells out to `pactl` (works with PulseAudio and PipeWire) against `@DEFAULT_SINK@`.
 - API routes: `GET /api/status`, `POST /api/set` (`{level}`), `POST /api/step` (`{delta}`), `POST /api/mute` (toggle).
 - The page polls `/api/status` every 2 seconds and debounces slider changes by 120 ms.
+- `--tray` runs GTK on the main thread and Flask in a daemon thread. Its libraries are imported only when the flag is set, and the server runs without the icon if they're unavailable. Update GTK widgets only from the main thread (`GLib.idle_add`), and keep `pactl` calls off it.
 
 ## Notes for changes
 
